@@ -1,0 +1,59 @@
+# Default configuration for FSRA project
+# Compatible with PyTorch 1.8, CUDA 10.2, cuDNN 7, Ubuntu 18.04
+
+model:
+  name: "FSRA"
+  backbone: "vit_small_patch16_224"
+  num_classes: 701
+  block_size: 3
+  share_weights: true
+  return_features: true
+  dropout_rate: 0.1
+
+data:
+  data_dir: "data/train"
+  test_dir: "data/test"
+  batch_size: 14
+  num_workers: 1
+  image_height: 256
+  image_width: 256
+  views: 2
+  sample_num: 7
+  pad: 0
+  color_jitter: false
+  random_erasing_prob: 0.0
+
+training:
+  num_epochs: 120
+  learning_rate: 0.01
+  weight_decay: 0.0005
+  momentum: 0.9
+  warm_epochs: 0
+  lr_scheduler_steps: [70, 110]
+  lr_scheduler_gamma: 0.1
+  
+  # Loss configuration
+  triplet_loss_weight: 0.3
+  kl_loss_weight: 0.0
+  use_kl_loss: false
+  
+  # Mixed precision training (disabled for PyTorch 1.8 compatibility)
+  use_fp16: false
+  use_autocast: false
+  
+  # Data augmentation
+  use_data_augmentation: false
+  moving_avg: 1.0
+
+system:
+  gpu_ids: "0"
+  use_gpu: true
+  seed: 42
+  log_interval: 10
+  save_interval: 10
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  pretrained_dir: "pretrained"
+
+# Mode: 0 for training, 1 for testing
+mode: 0

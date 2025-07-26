@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Data files - exclude actual data but keep structure
+data/train/
+data/test/
+data/*.zip
+data/*.tar
+data/*.gz
+
+# Model files
+*.pth
+*.pt
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints

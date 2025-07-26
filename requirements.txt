@@ -1,0 +1,32 @@
+# PyTorch 1.8 compatible requirements
+# For CUDA 10.2, cuDNN 7, Ubuntu 18.04
+
+# Core deep learning framework
+torch==1.8.0
+torchvision==0.9.0
+
+# Configuration and data handling
+pyyaml>=5.4.0,<6.0
+numpy>=1.19.0,<1.22.0
+scipy>=1.6.0,<1.8.0
+pillow>=8.0.0,<9.0.0
+
+# Progress and logging
+tqdm>=4.60.0
+tensorboard>=2.4.0
+
+# Image processing and visualization
+matplotlib>=3.3.0,<3.6.0
+opencv-python>=4.5.0,<5.0.0
+
+# Scientific computing
+scikit-learn>=0.24.0,<1.1.0
+
+# Optional: For better performance
+# Note: APEX is optional and may require manual installation for PyTorch 1.8
+# apex  # Uncomment if you want to use APEX for mixed precision training
+
+# Development and testing (optional)
+pytest>=6.0.0
+flake8>=3.8.0
+black>=21.0.0
