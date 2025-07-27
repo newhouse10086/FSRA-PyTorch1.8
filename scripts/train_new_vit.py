@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training script for FSRA model.
+Training script specifically for New ViT model with community clustering.
 Compatible with PyTorch 1.8, CUDA 10.2, cuDNN 7, Ubuntu 18.04.
 """
 
@@ -19,8 +19,8 @@ import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 
 from config import load_config, Config, merge_config_with_args
-from src.models import make_fsra_model, make_new_vit_model, CrossAttentionModel
-from src.models.model_factory import create_model, create_cross_attention_model, print_model_info
+from src.models.new_vit import make_new_vit_model
+from src.models.model_factory import create_cross_attention_model, print_model_info
 from src.datasets import make_dataloader
 from src.utils.logger import setup_logger
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
@@ -29,7 +29,7 @@ from src.utils.metrics import AverageMeter, accuracy
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='FSRA Training')
+    parser = argparse.ArgumentParser(description='New ViT Training')
     
     # Config file
     parser.add_argument('--config', type=str, default='config/default_config.yaml',
@@ -41,24 +41,20 @@ def parse_args():
     parser.add_argument('--learning_rate', type=float, help='Learning rate')
     parser.add_argument('--num_epochs', type=int, help='Number of epochs')
     parser.add_argument('--gpu_ids', type=str, help='GPU IDs to use')
-
-    # Model selection
-    parser.add_argument('--model', type=str, choices=['FSRA', 'NewViT'],
-                       help='Model type to train')
-
-    # Training options
-    parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from')
-    parser.add_argument('--pretrained', type=str, help='Path to pretrained model')
-    parser.add_argument('--from_scratch', action='store_true',
-                       help='Train from scratch without pretrained weights')
-
+    
     # New ViT specific options
     parser.add_argument('--use_pretrained_resnet', action='store_true', default=True,
-                       help='Use pretrained ResNet18 for NewViT model')
+                       help='Use pretrained ResNet18')
     parser.add_argument('--use_pretrained_vit', action='store_true', default=False,
-                       help='Use pretrained ViT weights for NewViT model')
+                       help='Use pretrained ViT weights')
     parser.add_argument('--num_final_clusters', type=int, default=3,
-                       help='Number of final clusters for NewViT model')
+                       help='Number of final clusters')
+    parser.add_argument('--from_scratch', action='store_true',
+                       help='Train completely from scratch')
+    
+    # Training options
+    parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from')
+    parser.add_argument('--pretrained_vit', type=str, help='Path to pretrained ViT model')
     
     return parser.parse_args()
 
@@ -82,23 +78,32 @@ def setup_device(config):
         return device, []
 
 
-def create_models(config, device, use_pretrained=True):
-    """Create and initialize models."""
-    # Main model (FSRA or NewViT)
-    model = create_model(config, use_pretrained=use_pretrained)
-
-    # Cross attention model
-    cross_attention = create_cross_attention_model(config)
-
-    # Move to device
-    model = model.to(device)
-    cross_attention = cross_attention.to(device)
-
-    # Print model information
-    print_model_info(model, f"{config.model.name} Model")
-    print_model_info(cross_attention, "Cross Attention Model")
-
-    return model, cross_attention
+def create_new_vit_model(config, use_pretrained_resnet=True, use_pretrained_vit=False, 
+                        num_final_clusters=3, pretrained_vit_path=None):
+    """Create New ViT model with specified settings."""
+    model = make_new_vit_model(
+        num_classes=config.model.num_classes,
+        use_pretrained_resnet=use_pretrained_resnet,
+        use_pretrained_vit=use_pretrained_vit,
+        num_final_clusters=num_final_clusters,
+        return_f=config.model.return_features,
+        views=config.data.views,
+        share_weights=config.model.share_weights
+    )
+    
+    # Load pretrained ViT weights if specified
+    if pretrained_vit_path and os.path.exists(pretrained_vit_path):
+        print(f"Loading pretrained ViT weights from: {pretrained_vit_path}")
+        if hasattr(model, 'model_1'):
+            # Two-view model
+            model.model_1.load_pretrained_vit(pretrained_vit_path)
+            if not config.model.share_weights and hasattr(model, 'model_2'):
+                model.model_2.load_pretrained_vit(pretrained_vit_path)
+        else:
+            # Single-view model
+            model.load_pretrained_vit(pretrained_vit_path)
+    
+    return model
 
 
 def create_optimizers(model, cross_attention, config):
@@ -142,6 +147,18 @@ def create_loss_functions(config):
     return criterion, mse_loss, triplet_loss
 
 
+def compute_alignment_loss(features_s, features_d, mse_loss):
+    """Compute feature alignment loss between satellite and drone features."""
+    if len(features_s) != len(features_d):
+        return torch.tensor(0.0, device=features_s[0].device)
+    
+    alignment_loss = 0.0
+    for feat_s, feat_d in zip(features_s, features_d):
+        alignment_loss += mse_loss(feat_s, feat_d)
+    
+    return alignment_loss / len(features_s)
+
+
 def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer, 
                 criterion, mse_loss, triplet_loss, config, epoch, logger, writer):
     """Train for one epoch."""
@@ -150,7 +167,7 @@ def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer,
     
     losses = AverageMeter()
     cls_losses = AverageMeter()
-    ca_losses = AverageMeter()
+    alignment_losses = AverageMeter()
     accuracies = AverageMeter()
     
     start_time = time.time()
@@ -180,21 +197,16 @@ def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer,
         outputs_d, features_d = model(inputs_d)
         
         # Classification loss
-        cls_loss = criterion(outputs_s[0], labels_s) + criterion(outputs_d[0], labels_d)
+        cls_loss = 0.0
+        for out_s, out_d in zip(outputs_s, outputs_d):
+            cls_loss += criterion(out_s, labels_s) + criterion(out_d, labels_d)
+        cls_loss /= len(outputs_s)
         
-        # Cross attention loss (simplified)
-        ca_loss = torch.tensor(0.0, device=inputs_s.device)
-        if len(features_s) > 1 and len(features_d) > 1:
-            # Prepare features for cross attention
-            feat_s = torch.cat(features_s[1:], dim=1).unsqueeze(1)
-            feat_d = torch.cat(features_d[1:], dim=1).view(batch_size, -1, feat_s.size(-1))
-            
-            # Cross attention
-            result_s, result_d = cross_attention(feat_s, feat_d, mode=config.mode)
-            ca_loss = mse_loss(result_s, result_d)
+        # Feature alignment loss
+        alignment_loss = compute_alignment_loss(features_s, features_d, mse_loss)
         
         # Total loss
-        total_loss = cls_loss + ca_loss
+        total_loss = cls_loss + 0.1 * alignment_loss  # Weight alignment loss
         
         # Backward pass
         total_loss.backward()
@@ -205,7 +217,7 @@ def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer,
         acc = accuracy(outputs_s[0], labels_s)[0]
         losses.update(total_loss.item(), batch_size)
         cls_losses.update(cls_loss.item(), batch_size)
-        ca_losses.update(ca_loss.item(), batch_size)
+        alignment_losses.update(alignment_loss.item(), batch_size)
         accuracies.update(acc.item(), batch_size)
         
         # Log progress
@@ -213,14 +225,14 @@ def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer,
             logger.info(f'Epoch: {epoch} [{batch_idx}/{len(dataloader)}] '
                        f'Loss: {losses.avg:.4f} '
                        f'Cls: {cls_losses.avg:.4f} '
-                       f'CA: {ca_losses.avg:.4f} '
+                       f'Align: {alignment_losses.avg:.4f} '
                        f'Acc: {accuracies.avg:.2f}%')
     
     # Log to tensorboard
     if writer:
         writer.add_scalar('Train/Loss', losses.avg, epoch)
         writer.add_scalar('Train/ClassificationLoss', cls_losses.avg, epoch)
-        writer.add_scalar('Train/CrossAttentionLoss', ca_losses.avg, epoch)
+        writer.add_scalar('Train/AlignmentLoss', alignment_losses.avg, epoch)
         writer.add_scalar('Train/Accuracy', accuracies.avg, epoch)
     
     epoch_time = time.time() - start_time
@@ -240,28 +252,26 @@ def main():
     else:
         config = Config()
     
+    # Override model name to NewViT
+    config.model.name = "NewViT"
+    
     # Merge with command line arguments
     config = merge_config_with_args(config, vars(args))
-
-    # Override model name if specified
-    if args.model:
-        config.model.name = args.model
-
-    # Override pretrained settings if specified
-    if hasattr(args, 'use_pretrained_resnet'):
-        config.model.use_pretrained_resnet = args.use_pretrained_resnet
-    if hasattr(args, 'use_pretrained_vit'):
-        config.model.use_pretrained_vit = args.use_pretrained_vit
-    if hasattr(args, 'num_final_clusters'):
-        config.model.num_final_clusters = args.num_final_clusters
-
-    # Determine if using pretrained weights
-    use_pretrained = not args.from_scratch if hasattr(args, 'from_scratch') else True
+    
+    # Determine training mode
+    if args.from_scratch:
+        use_pretrained_resnet = False
+        use_pretrained_vit = False
+        training_mode = "completely from scratch"
+    else:
+        use_pretrained_resnet = args.use_pretrained_resnet
+        use_pretrained_vit = args.use_pretrained_vit
+        training_mode = f"ResNet18: {'pretrained' if use_pretrained_resnet else 'scratch'}, ViT: {'pretrained' if use_pretrained_vit else 'scratch'}"
     
     # Setup logging
-    logger = setup_logger('train', config.system.log_dir)
-    logger.info(f"Starting {config.model.name} training with config: {args.config}")
-    logger.info(f"Training mode: {'From scratch' if not use_pretrained else 'With pretrained weights'}")
+    logger = setup_logger('train_new_vit', config.system.log_dir)
+    logger.info(f"Starting New ViT training with config: {args.config}")
+    logger.info(f"Training mode: {training_mode}")
     
     # Setup device
     device, gpu_ids = setup_device(config)
@@ -280,8 +290,24 @@ def main():
         dataloader = None
     
     # Create models
-    model, cross_attention = create_models(config, device, use_pretrained=use_pretrained)
-    logger.info(f"{config.model.name} models created successfully")
+    model = create_new_vit_model(
+        config, 
+        use_pretrained_resnet=use_pretrained_resnet,
+        use_pretrained_vit=use_pretrained_vit,
+        num_final_clusters=args.num_final_clusters,
+        pretrained_vit_path=args.pretrained_vit
+    )
+    cross_attention = create_cross_attention_model(config)
+    
+    # Move to device
+    model = model.to(device)
+    cross_attention = cross_attention.to(device)
+    
+    # Print model information
+    print_model_info(model, "New ViT Model")
+    print_model_info(cross_attention, "Cross Attention Model")
+    
+    logger.info("New ViT models created successfully")
     
     # Create optimizers
     optimizer, cross_optimizer, scheduler = create_optimizers(model, cross_attention, config)
@@ -297,11 +323,6 @@ def main():
     if args.resume:
         start_epoch = load_checkpoint(args.resume, model, optimizer)
         logger.info(f"Resumed from epoch {start_epoch}")
-    
-    # Load pretrained weights
-    if args.pretrained:
-        model.load_pretrained(args.pretrained)
-        logger.info(f"Loaded pretrained weights from {args.pretrained}")
     
     # Training loop
     if dataloader is not None:
@@ -319,7 +340,7 @@ def main():
             # Save checkpoint
             if epoch % config.system.save_interval == 0:
                 save_checkpoint(model, optimizer, epoch, train_loss, 
-                              os.path.join(config.system.checkpoint_dir, f'checkpoint_epoch_{epoch}.pth'))
+                              os.path.join(config.system.checkpoint_dir, f'new_vit_checkpoint_epoch_{epoch}.pth'))
         
         logger.info("Training completed!")
     else:

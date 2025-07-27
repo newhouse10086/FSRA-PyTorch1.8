@@ -22,6 +22,9 @@ opencv-python>=4.5.0,<5.0.0
 # Scientific computing
 scikit-learn>=0.24.0,<1.1.0
 
+# Graph processing for community clustering
+networkx>=2.5,<3.0
+
 # Optional: For better performance
 # Note: APEX is optional and may require manual installation for PyTorch 1.8
 # apex  # Uncomment if you want to use APEX for mixed precision training
