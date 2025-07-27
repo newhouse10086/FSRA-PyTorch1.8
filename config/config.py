@@ -17,6 +17,15 @@ class ModelConfig:
     return_features: bool = True
     dropout_rate: float = 0.1
 
+    # Pretrained model settings
+    use_pretrained: bool = True
+    pretrained_path: str = "pretrained/vit_small_p16_224-15ec54c9.pth"
+
+    # New ViT specific settings
+    use_pretrained_resnet: bool = True
+    use_pretrained_vit: bool = False
+    num_final_clusters: int = 3
+
 
 @dataclass
 class DataConfig:
@@ -154,9 +163,13 @@ def merge_config_with_args(config: Config, args: Optional[Dict[str, Any]] = None
     """Merge configuration with command line arguments."""
     if args is None:
         return config
-    
+
     # Update config with command line arguments
     for key, value in args.items():
+        # Skip None values and special arguments
+        if value is None or key in ['config', 'resume', 'pretrained', 'from_scratch']:
+            continue
+
         if hasattr(config.model, key):
             setattr(config.model, key, value)
         elif hasattr(config.data, key):
@@ -167,5 +180,5 @@ def merge_config_with_args(config: Config, args: Optional[Dict[str, Any]] = None
             setattr(config.system, key, value)
         elif hasattr(config, key):
             setattr(config, key, value)
-    
+
     return config

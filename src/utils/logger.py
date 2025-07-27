@@ -18,7 +18,8 @@ def setup_logger(name: str, log_dir: str, level: int = logging.INFO) -> logging.
     Returns:
         Configured logger
     """
-    # Create log directory if it doesn't exist
+    # Create log directory if it doesn't exist (cross-platform)
+    log_dir = os.path.normpath(log_dir)
     os.makedirs(log_dir, exist_ok=True)
     
     # Create logger

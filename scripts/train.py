@@ -85,15 +85,8 @@ def setup_device(config):
 
 def create_models(config, device, use_pretrained=True):
     """Create and initialize models."""
-    # Main model (FSRA or NewViT)
-    model = create_model(config, use_pretrained=use_pretrained)
-
-    # Cross attention model
-    cross_attention = create_cross_attention_model(config)
-
-    # Move to device
-    model = model.to(device)
-    cross_attention = cross_attention.to(device)
+    # Create models using factory function
+    model, cross_attention = create_model(config, device=device, use_pretrained=use_pretrained)
 
     # Print model information
     print_model_info(model, f"{config.model.name} Model")

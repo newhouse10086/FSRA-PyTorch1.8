@@ -93,7 +93,8 @@ class EvaluationTracker:
         self.experiment_name = experiment_name
         self.metrics_history = []
         
-        # Create directories
+        # Create directories (cross-platform)
+        save_dir = os.path.normpath(save_dir)
         os.makedirs(save_dir, exist_ok=True)
         os.makedirs(os.path.join(save_dir, 'plots'), exist_ok=True)
         

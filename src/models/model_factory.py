@@ -10,25 +10,37 @@ from .new_vit import make_new_vit_model, NewViTModel, NewTwoViewNet
 from .cross_attention import CrossAttentionModel
 
 
-def create_model(config: Dict[str, Any], use_pretrained: bool = True) -> nn.Module:
+def create_model(config: Dict[str, Any], device: str = 'cuda', use_pretrained: bool = True) -> tuple:
     """
     Create model based on configuration.
-    
+
     Args:
         config: Configuration dictionary
+        device: Device to place model on
         use_pretrained: Whether to use pretrained weights
-        
+
     Returns:
-        Model instance
+        Tuple of (model, cross_attention_model)
     """
     model_name = config.model.name.upper()
-    
+
     if model_name == "FSRA":
-        return create_fsra_model(config, use_pretrained)
+        model = create_fsra_model(config, use_pretrained)
     elif model_name == "NEWVIT":
-        return create_new_vit_model(config, use_pretrained)
+        model = create_new_vit_model(config, use_pretrained)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
+
+    # Move model to device
+    if device != 'cpu' and torch.cuda.is_available():
+        model = model.cuda()
+
+    # Create cross attention model
+    cross_attention = create_cross_attention_model(config)
+    if device != 'cpu' and torch.cuda.is_available():
+        cross_attention = cross_attention.cuda()
+
+    return model, cross_attention
 
 
 def create_fsra_model(config: Dict[str, Any], use_pretrained: bool = True) -> nn.Module:

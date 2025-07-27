@@ -3,6 +3,7 @@
 import os
 import torch
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 
 def save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, 
@@ -19,7 +20,8 @@ def save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
         filepath: Path to save checkpoint
         additional_info: Additional information to save
     """
-    # Create directory if it doesn't exist
+    # Create directory if it doesn't exist (cross-platform)
+    filepath = os.path.normpath(filepath)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     
     # Prepare checkpoint data
