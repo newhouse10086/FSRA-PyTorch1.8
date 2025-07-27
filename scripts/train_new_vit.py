@@ -25,6 +25,7 @@ from src.datasets import make_dataloader
 from src.utils.logger import setup_logger
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.metrics import AverageMeter, accuracy
+from src.utils.evaluation import evaluate_model, EvaluationTracker
 
 
 def parse_args():
@@ -237,8 +238,16 @@ def train_epoch(model, cross_attention, dataloader, optimizer, cross_optimizer,
     
     epoch_time = time.time() - start_time
     logger.info(f'Epoch {epoch} completed in {epoch_time:.2f}s')
-    
-    return losses.avg
+
+    # Return training metrics
+    train_metrics = {
+        'loss': losses.avg,
+        'classification_loss': cls_losses.avg,
+        'alignment_loss': alignment_losses.avg,
+        'accuracy': accuracies.avg
+    }
+
+    return train_metrics
 
 
 def main():
@@ -276,18 +285,22 @@ def main():
     # Setup device
     device, gpu_ids = setup_device(config)
     
-    # Create data loader
+    # Create data loaders
     try:
-        dataloader, class_names, dataset_sizes = make_dataloader(config, mode='train')
+        train_dataloader, class_names, dataset_sizes = make_dataloader(config, mode='train')
+        test_dataloader, _, _ = make_dataloader(config, mode='test')
         config.model.num_classes = len(class_names)
-        logger.info(f"Dataset loaded: {len(class_names)} classes, {dataset_sizes['total']} samples")
+        logger.info(f"Dataset loaded: {len(class_names)} classes")
+        logger.info(f"Train samples: {dataset_sizes.get('train', 'Unknown')}")
+        logger.info(f"Test samples: {dataset_sizes.get('test', 'Unknown')}")
     except Exception as e:
         logger.error(f"Failed to create dataloader: {e}")
         logger.info("This is expected if the dataset is not available. The model structure is still valid.")
         # Create dummy values for testing
         class_names = [f"class_{i}" for i in range(config.model.num_classes)]
-        dataset_sizes = {'total': 1000}
-        dataloader = None
+        dataset_sizes = {'train': 1000, 'test': 200}
+        train_dataloader = None
+        test_dataloader = None
     
     # Create models
     model = create_new_vit_model(
@@ -315,8 +328,14 @@ def main():
     # Create loss functions
     criterion, mse_loss, triplet_loss = create_loss_functions(config)
     
-    # Setup tensorboard
+    # Setup tensorboard and evaluation tracker
     writer = SummaryWriter(log_dir=os.path.join(config.system.log_dir, 'tensorboard'))
+
+    # Initialize evaluation tracker
+    evaluation_tracker = EvaluationTracker(
+        save_dir=config.system.log_dir,
+        experiment_name=f"new_vit_{training_mode.replace(' ', '_').replace(':', '_')}"
+    )
     
     # Load checkpoint if resuming
     start_epoch = 0
@@ -325,24 +344,86 @@ def main():
         logger.info(f"Resumed from epoch {start_epoch}")
     
     # Training loop
-    if dataloader is not None:
+    if train_dataloader is not None:
         logger.info("Starting training...")
         for epoch in range(start_epoch, config.training.num_epochs):
             # Train one epoch
-            train_loss = train_epoch(
-                model, cross_attention, dataloader, optimizer, cross_optimizer,
+            train_metrics = train_epoch(
+                model, cross_attention, train_dataloader, optimizer, cross_optimizer,
                 criterion, mse_loss, triplet_loss, config, epoch, logger, writer
             )
-            
+
+            # Evaluate on test set
+            if test_dataloader is not None:
+                logger.info(f"Evaluating on test set - Epoch {epoch}")
+                test_metrics, y_true, y_pred, y_prob = evaluate_model(
+                    model, test_dataloader, device, config.model.num_classes, class_names
+                )
+
+                # Log test metrics
+                logger.info(f"Test Results - Epoch {epoch}:")
+                logger.info(f"  Accuracy: {test_metrics['accuracy']:.4f}")
+                logger.info(f"  AUC-ROC: {test_metrics.get('auc_roc_macro', test_metrics.get('auc_roc', 0)):.4f}")
+                logger.info(f"  Precision (Macro): {test_metrics['precision_macro']:.4f}")
+                logger.info(f"  Recall (Macro): {test_metrics['recall_macro']:.4f}")
+                logger.info(f"  F1-Score (Macro): {test_metrics['f1_macro']:.4f}")
+
+                # Add to tensorboard
+                for metric_name, metric_value in test_metrics.items():
+                    writer.add_scalar(f'Test/{metric_name}', metric_value, epoch)
+
+                # Save metrics to tracker
+                evaluation_tracker.add_epoch_metrics(
+                    epoch=epoch,
+                    train_metrics=train_metrics,
+                    val_metrics=test_metrics,
+                    learning_rate=optimizer.param_groups[0]['lr']
+                )
+
+                # Generate visualizations every 10 epochs or at the end
+                if epoch % 10 == 0 or epoch == config.training.num_epochs - 1:
+                    # Plot metrics
+                    evaluation_tracker.plot_metrics()
+
+                    # Plot confusion matrix
+                    evaluation_tracker.plot_confusion_matrix(
+                        y_true, y_pred, class_names, epoch
+                    )
+
+                    # Plot ROC curves (for reasonable number of classes)
+                    if len(class_names) <= 20:
+                        evaluation_tracker.plot_roc_curves(
+                            y_true, y_prob, class_names, epoch
+                        )
+
+                    # Save classification report
+                    evaluation_tracker.save_classification_report(
+                        y_true, y_pred, class_names, epoch
+                    )
+            else:
+                # No test data, just save train metrics
+                evaluation_tracker.add_epoch_metrics(
+                    epoch=epoch,
+                    train_metrics=train_metrics,
+                    val_metrics={},
+                    learning_rate=optimizer.param_groups[0]['lr']
+                )
+
             # Update learning rate
             scheduler.step()
-            
+
             # Save checkpoint
             if epoch % config.system.save_interval == 0:
-                save_checkpoint(model, optimizer, epoch, train_loss, 
+                save_checkpoint(model, optimizer, epoch, train_metrics.get('loss', 0),
                               os.path.join(config.system.checkpoint_dir, f'new_vit_checkpoint_epoch_{epoch}.pth'))
-        
+
         logger.info("Training completed!")
+
+        # Final evaluation and visualization
+        if test_dataloader is not None:
+            logger.info("Generating final evaluation report...")
+            evaluation_tracker.plot_metrics()
+
     else:
         logger.info("No dataloader available. Training skipped.")
     

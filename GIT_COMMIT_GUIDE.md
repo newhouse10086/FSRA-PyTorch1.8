@@ -254,4 +254,66 @@ git reset HEAD filename
 git reset --soft HEAD~1
 ```
 
+## 提交评估功能更新
+
+### 最新功能提交命令
+
+```bash
+# 1. 配置Git用户信息（如果还没配置）
+git config --global user.name "newhouse10086"
+git config --global user.email "1914906669@qq.com"
+
+# 2. 添加所有更改
+git add .
+
+# 3. 提交评估功能更新
+git commit -m "feat: Add comprehensive evaluation metrics and visualization system
+
+## New Features
+- Automatic test set evaluation every epoch
+- Comprehensive metrics calculation (AUC, ACC, Recall, Precision, F1)
+- CSV logging of training progress with timestamps
+- Automatic visualization generation (training curves, confusion matrix, ROC curves)
+- TensorBoard integration for real-time monitoring
+- Classification report generation
+
+## Technical Implementation
+- MetricsCalculator class for comprehensive metric computation
+- EvaluationTracker class for automatic logging and visualization
+- Integration with both FSRA and NewViT training scripts
+- Support for multi-class classification metrics
+- Automatic plot generation every 10 epochs
+
+## New Files
+- src/utils/evaluation.py: Core evaluation functionality
+- scripts/test_evaluation.py: Testing script for evaluation system
+
+## Updated Files
+- scripts/train.py: Added test set evaluation
+- scripts/train_new_vit.py: Added comprehensive evaluation
+- requirements.txt: Added seaborn for visualization
+- README_TRAINING_MODES.md: Added evaluation documentation
+
+## Output Files
+- CSV metrics log: logs/{experiment_name}_metrics.csv
+- Visualization plots: logs/plots/*.png
+- Classification reports: logs/*_classification_report_*.csv
+- TensorBoard logs: logs/tensorboard/
+
+## Usage
+Training automatically evaluates on test set each epoch:
+- Logs metrics to console and CSV
+- Generates visualizations every 10 epochs
+- Saves comprehensive performance reports
+- Provides real-time TensorBoard monitoring
+
+Test the evaluation system:
+python scripts/test_evaluation.py
+
+Tested-by: newhouse10086 <1914906669@qq.com>"
+
+# 4. 推送到远程仓库
+git push origin main
+```
+
 现在你可以按照这个指南提交你的代码更新了！

@@ -221,9 +221,38 @@ python scripts/train_new_vit.py \
 - **日志**：`logs/`
 - **TensorBoard**：`logs/tensorboard/`
 
+## 评估指标和可视化
+
+### 自动计算的指标
+训练过程中每个epoch都会在测试集上计算以下指标：
+
+- **Accuracy**: 分类准确率
+- **AUC-ROC**: ROC曲线下面积（多分类使用macro/weighted平均）
+- **Precision**: 精确率（macro/micro平均）
+- **Recall**: 召回率（macro/micro平均）
+- **F1-Score**: F1分数（macro/micro平均）
+
+### 自动生成的可视化
+1. **训练曲线图**: Loss、Accuracy、AUC、F1等指标的训练/验证曲线
+2. **混淆矩阵**: 每10个epoch生成一次
+3. **ROC曲线**: 多分类ROC曲线（类别数≤20时）
+4. **分类报告**: 详细的每类别性能报告
+
+### 结果保存
+- **CSV文件**: `logs/{experiment_name}_metrics.csv` - 包含所有epoch的指标
+- **可视化图片**: `logs/plots/` 目录下的PNG文件
+- **TensorBoard日志**: `logs/tensorboard/` 目录
+
+### 测试评估功能
+```bash
+# 测试评估系统是否正常工作
+python scripts/test_evaluation.py
+```
+
 ## 下一步
 
 1. 根据你的硬件配置选择合适的模型和训练模式
 2. 准备University-1652数据集
 3. 运行相应的训练命令
 4. 监控训练过程和性能指标
+5. 查看自动生成的评估报告和可视化结果
