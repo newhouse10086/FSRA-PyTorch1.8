@@ -164,21 +164,32 @@ def merge_config_with_args(config: Config, args: Optional[Dict[str, Any]] = None
     if args is None:
         return config
 
+    # Ensure config is a proper Config object
+    if not isinstance(config, Config):
+        raise TypeError(f"Expected Config object, got {type(config)}")
+
     # Update config with command line arguments
     for key, value in args.items():
         # Skip None values and special arguments
         if value is None or key in ['config', 'resume', 'pretrained', 'from_scratch']:
             continue
 
-        if hasattr(config.model, key):
-            setattr(config.model, key, value)
-        elif hasattr(config.data, key):
-            setattr(config.data, key, value)
-        elif hasattr(config.training, key):
-            setattr(config.training, key, value)
-        elif hasattr(config.system, key):
-            setattr(config.system, key, value)
-        elif hasattr(config, key):
-            setattr(config, key, value)
+        try:
+            # Check each config section in order
+            if hasattr(config, 'model') and hasattr(config.model, key):
+                setattr(config.model, key, value)
+            elif hasattr(config, 'data') and hasattr(config.data, key):
+                setattr(config.data, key, value)
+            elif hasattr(config, 'training') and hasattr(config.training, key):
+                setattr(config.training, key, value)
+            elif hasattr(config, 'system') and hasattr(config.system, key):
+                setattr(config.system, key, value)
+            elif hasattr(config, key):
+                setattr(config, key, value)
+            else:
+                # Skip unknown arguments with a warning
+                print(f"Warning: Unknown configuration argument '{key}' with value '{value}'")
+        except Exception as e:
+            print(f"Warning: Failed to set config.{key} = {value}: {e}")
 
     return config

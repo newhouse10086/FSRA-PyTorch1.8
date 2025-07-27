@@ -241,11 +241,8 @@ def main():
         config = load_config(args.config)
     else:
         config = Config()
-    
-    # Merge with command line arguments
-    config = merge_config_with_args(config, vars(args))
 
-    # Override model name if specified
+    # Override model name BEFORE merging to avoid conflicts
     if args.model:
         config.model.name = args.model
 
@@ -256,6 +253,15 @@ def main():
         config.model.use_pretrained_vit = args.use_pretrained_vit
     if hasattr(args, 'num_final_clusters'):
         config.model.num_final_clusters = args.num_final_clusters
+
+    # Merge with command line arguments (excluding model to avoid overwrite)
+    args_dict = vars(args).copy()
+    # Remove arguments that we've already handled to prevent conflicts
+    for key in ['model', 'use_pretrained_resnet', 'use_pretrained_vit', 'num_final_clusters']:
+        if key in args_dict:
+            del args_dict[key]
+
+    config = merge_config_with_args(config, args_dict)
 
     # Determine if using pretrained weights
     use_pretrained = not args.from_scratch if hasattr(args, 'from_scratch') else True

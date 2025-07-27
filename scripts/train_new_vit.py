@@ -260,12 +260,18 @@ def main():
         config = load_config(args.config)
     else:
         config = Config()
-    
+
     # Override model name to NewViT
     config.model.name = "NewViT"
-    
-    # Merge with command line arguments
-    config = merge_config_with_args(config, vars(args))
+
+    # Merge with command line arguments (excluding special args to avoid conflicts)
+    args_dict = vars(args).copy()
+    # Remove arguments that might conflict with model configuration
+    for key in ['config', 'from_scratch', 'pretrained_vit']:
+        if key in args_dict:
+            del args_dict[key]
+
+    config = merge_config_with_args(config, args_dict)
     
     # Determine training mode
     if args.from_scratch:
